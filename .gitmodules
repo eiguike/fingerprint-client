@@ -4,3 +4,9 @@
 [submodule "libfprint"]
 	path = libfprint
 	url = https://github.com/eiguike/libfprint.git
+[submodule "library/libfprint"]
+	path = library/libfprint
+	url = https://github.com/eiguike/libfprint.git
+[submodule "library/libwebsockets"]
+	path = library/libwebsockets
+	url = https://github.com/warmcat/libwebsockets.git
