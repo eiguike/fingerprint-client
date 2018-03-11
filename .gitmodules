@@ -1,0 +1,6 @@
+[submodule "libwebsockets"]
+	path = libwebsockets
+	url = https://github.com/warmcat/libwebsockets.git
+[submodule "libfprint"]
+	path = libfprint
+	url = https://github.com/eiguike/libfprint.git
