@@ -4,6 +4,8 @@ project(fingerprint-client C)
 
 add_library(Server STATIC library/server.c)
 add_library(ServerHTTP STATIC library/protocols/http_protocol.c)
+add_library(Device STATIC library/device.c)
+add_library(Fingerprint STATIC library/fingerprint.c)
 
 include_directories("./include")
 
