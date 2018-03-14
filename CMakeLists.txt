@@ -17,6 +17,15 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/www
 
 target_link_libraries(Server websockets)
 target_link_libraries(Server ServerHTTP)
+
+target_link_libraries(Fingerprint curl)
+target_link_libraries(Fingerprint cjson)
+target_link_libraries(Fingerprint crypto)
+target_link_libraries(Fingerprint fprint)
+
+target_link_libraries(Device Fingerprint)
+
+target_link_libraries(fingerprint-client Device)
 target_link_libraries(fingerprint-client Server)
 
 install(TARGETS fingerprint-client DESTINATION /bin)
