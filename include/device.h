@@ -26,6 +26,7 @@ typedef struct FINGERPRINT_DEVICE {
   int Outdated;
 
   struct fp_dev* Device;
+  struct fp_img* FingerprintImage;
 } DEVICE;
 
 DEVICE* Device_Init(PROCESS_TYPE Type);
