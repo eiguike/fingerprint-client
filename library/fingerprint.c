@@ -15,11 +15,8 @@
 extern char* gUrl;
 extern char* gPassword;
 
-char* Url = "http://localhost:3000/api/fingerprint/";
-char* Body = "embedded_password=testelabpesquisa";
-
 unsigned char*
-DecodeBinaryToB64 (
+EncodeToB64 (
     struct fp_print_data** Print,
     size_t* Size
     )
@@ -76,7 +73,7 @@ FINISH:
 }
 
 unsigned char*
-DecodeB64ToBinary (
+DecodeFromB64 (
     char* Data,
     size_t Size,
     size_t* DecodeLen
@@ -100,8 +97,8 @@ DecodeB64ToBinary (
     *DecodeLen -= 1;
   }
 
-  printf("SIZE %ld\n", Size);
-  printf("DECODELEN %ld\n", *DecodeLen);
+  //printf("SIZE %ld\n", Size);
+  //printf("DECODELEN %ld\n", *DecodeLen);
 
   Buffer = (unsigned char*) calloc(*DecodeLen + 1, sizeof(char));
 
@@ -133,7 +130,6 @@ Fingerprint_Load (
     )
 {
   printf("Fingerprint_Load Begin \n");
-
   FINGERPRINT_FILE       FingerprintInstance;
   FILE*                  File = NULL;
   struct fp_print_data** Fingerprints = NULL;
@@ -142,9 +138,25 @@ Fingerprint_Load (
   size_t                 DecodeLen = 0;
   unsigned char*         Buffer = NULL;
   int                    Status = 0;
+  int                    Index = 0;
 
   if (This == NULL) {
     goto FINISH;
+  }
+
+  // Deallocating previously fingerprint list
+  if (This->FingerprintList != NULL) {
+    for (Index = 0; Index < This->NumberOfFingerprints; Index++) {
+      fp_print_data_free(This->FingerprintList[Index]);
+    }
+    free(This->FingerprintList);
+    This->FingerprintList = NULL;
+  }
+
+  // Deallocating previously UserId list
+  if (This->UserIdList != NULL) {
+    free(This->UserIdList);
+    This->UserIdList = NULL;
   }
 
   File = fopen("sigla_database.db", "rb");
@@ -156,9 +168,7 @@ Fingerprint_Load (
   }
 
   while(fscanf(File, "%d|%[^\n]", &FingerprintInstance.UserId, FingerprintInstance.Fingerprint) != EOF) {
-  //while(fread(&FingerprintInstance, 1, sizeof(FINGERPRINT_FILE), File)) {
     NoFingerprints++;
-
     Fingerprints = realloc(Fingerprints, sizeof(struct fp_print_data*) * NoFingerprints);
     if (Fingerprints == NULL) {
       Status = 1;
@@ -171,8 +181,7 @@ Fingerprint_Load (
       goto GENERAL_ERROR;
     }
 
-    Buffer = DecodeB64ToBinary(FingerprintInstance.Fingerprint, 16068, &DecodeLen);
-
+    Buffer = DecodeFromB64(FingerprintInstance.Fingerprint, 16068, &DecodeLen);
     if (Buffer == NULL) {
       Status = 1;
       goto GENERAL_ERROR;
@@ -181,30 +190,34 @@ Fingerprint_Load (
     Fingerprints[NoFingerprints - 1] = fp_print_data_from_data(Buffer, DecodeLen);
     UserIds[NoFingerprints - 1] = FingerprintInstance.UserId;
 
-    if (Fingerprints[NoFingerprints - 1 ] == NULL ) {
+    if (Fingerprints[NoFingerprints - 1] == NULL ) {
       printf("could not ready entry from cache file\n");
       Status = 1;
       goto GENERAL_ERROR;
     }
+
+    free(Buffer);
+    Buffer = NULL;
   }
 
-  // Last fingerprint should be NULL
   NoFingerprints++;
   Fingerprints = realloc(Fingerprints, sizeof(struct fp_print_data*) * NoFingerprints);
   if (Fingerprints == NULL) {
     Status = 1;
     goto GENERAL_ERROR;
   }
-
   Fingerprints[NoFingerprints - 1] = NULL;
+
   This->FingerprintList = Fingerprints;
   This->UserIdList = UserIds;
+  This->NumberOfFingerprints = NoFingerprints - 1;
+
   goto FINISH;
 
 GENERAL_ERROR:
-  if (Fingerprints != NULL) {
-    free(Fingerprints);
-    Fingerprints = NULL;
+  if (This->FingerprintList != NULL) {
+    //fp_print_data_free(This->FingerprintList);
+    This->FingerprintList = NULL;
   }
   if (UserIds != NULL) {
     free(UserIds);
@@ -216,6 +229,11 @@ GENERAL_ERROR:
   }
 
 FINISH:
+
+  if (File != NULL) {
+    fclose(File);
+  }
+
   return Status;
 }
 
@@ -243,7 +261,7 @@ Fingerprint_Write (
     goto FINISH;
   }
 
-  JsonData = cJSON_Parse((char*)This->Data);
+  JsonData = cJSON_Parse((char*)This->Data[0]);
   if (JsonData == NULL) {
     printf("Could not parse JSON request!\n");
     goto FINISH;
@@ -264,6 +282,7 @@ Fingerprint_Write (
   }
 
 FINISH:
+  printf("Fingerprint_Write End\n");
   if (File != NULL) {
     fclose(File);
   }
@@ -279,16 +298,29 @@ Fingerprint_Dispose (
     FINGERPRINT* This
     )
 {
-  printf("Fingerprint_Dispose Begin\n");
+  int Index = 0;
+
   if (This != NULL) {
     if (This->Data != NULL) {
+      for (Index = 0; Index < This->NumberOfPackets; Index++) {
+        if (This->Data[Index] != NULL) {
+          free(This->Data[Index]);
+          This->Data[Index] = NULL;
+        }
+      }
       free(This->Data);
+      This->Data = NULL;
     }
     if (This->FingerprintList != NULL) {
+      for (Index = 0; Index < This->NumberOfFingerprints; Index++) {
+        fp_print_data_free(This->FingerprintList[Index]);
+      }
       free(This->FingerprintList);
+      This->FingerprintList = NULL;
     }
     if (This->UserIdList != NULL) {
       free(This->UserIdList);
+      This->UserIdList = NULL;
     }
     free(This);
   }
@@ -305,43 +337,65 @@ Fingerprint_Download (
 {
   FINGERPRINT* This = NULL;
   char*        Aux = NULL;
-  int          SizeOldData = 0;
-  int          NewSize = 0;
+  int          Size = 0;
+  int          LastIndex = 0;
+  int          Index = 0;
 
   if (userdata == NULL) {
+    printf("Userdata == NULL %d\n", __LINE__);
     goto FINISH;
   }
 
   This = (FINGERPRINT*) userdata;
-  Aux = (char*) This->Data;
 
-  if (Aux != NULL) {
-    SizeOldData = strlen(Aux);
+  if (This->LargePacket < nmemb) {
+    This->LargePacket = nmemb;
   }
 
-  if (strlen(ptr) != nmemb) {
-    // it is the last packet, so we need to remove some chunk bytes there
-    Aux = (char*) realloc(Aux, strlen(ptr) - 7 + SizeOldData + 1);
-    memcpy(Aux + SizeOldData, ptr, strlen(ptr) - 7);
-    //strncpy(Aux + SizeOldData, ptr, strlen(ptr) - 7);
-    NewSize = strlen(ptr) - 7 + SizeOldData;
+  if (strlen(ptr) == nmemb) {
+    This->Data = realloc(This->Data, sizeof(char*) * (This->NumberOfPackets + 1));
+    Aux = (char*) calloc(1, nmemb + 1);
+    strcpy(Aux, ptr);
+    This->Data[This->NumberOfPackets] = Aux;
+    This->NumberOfPackets += 1;
   } else {
-    Aux = (char*) realloc(Aux, strlen(ptr) + SizeOldData + 1);
-    //strncpy(Aux + SizeOldData, ptr, strlen(ptr));
-    memcpy(Aux + SizeOldData, ptr, strlen(ptr));
-    NewSize = strlen(ptr) + SizeOldData;
-  }
+    This->NumberOfPackets += 1;
+    Aux = (char*) calloc(1, This->NumberOfPackets * This->LargePacket);
 
-  This->Data = Aux;
+    for (Index = 0; Index < This->NumberOfPackets - 1; Index++) {
+      Size = strlen(This->Data[Index]);
+      strcpy(Aux + LastIndex, This->Data[Index]);
+      if (Index == 0) {
+        LastIndex += Size - 1;
+      } else {
+        LastIndex += Size;
+      }
+      free(This->Data[Index]);
+    }
+    strncpy(Aux + LastIndex, ptr, nmemb);
+
+    This->Data = realloc(This->Data, sizeof(char*) + 1);
+    This->Data[0] = Aux;
+    This->Data[1] = NULL;
+    This->NumberOfPackets = 2;
+  }
 
 FINISH:
   return size * nmemb;
 }
 
 int
+Fingerprint_Send (
+    FINGERPRINT* This
+    )
+{
+  return 0;
+}
+
+int
 Fingerprint_Add (
     FINGERPRINT* This,
-    int Index
+    FINGERPRINT_FILE_ENROLL* Fingerprint
     )
 {
   return 0;
@@ -364,14 +418,20 @@ Fingerprint_Update (
 {
   printf("Fingerprint_Update Begin\n");
   int       Status = 0;
+  int       Index = 0;
   CURL*     Curl = NULL;
-  CURLcode  Resource;
+  CURLcode  Resource = 0;
+  char*     LocalUrl = NULL;
+  char*     Body = NULL;
+  char*     AccessBody = "embedded_password=%s";
+  char*     AccessUrl = "/api/fingerprint/";
 
   if (This == NULL) {
     Status = 1;
     goto FINISH;
   }
 
+  printf("fingerprint.c %d\n", __LINE__);
   Curl = curl_easy_init();
 
   if (Curl == NULL) {
@@ -379,7 +439,14 @@ Fingerprint_Update (
     Status = 1;
     goto FINISH;
   } else {
-    curl_easy_setopt(Curl, CURLOPT_URL, Url);
+    Body = realloc(Body, strlen(AccessBody) + strlen(gPassword) + 1);
+    sprintf(Body, AccessBody, gPassword);
+    LocalUrl = realloc(LocalUrl, strlen(gUrl) + strlen(AccessUrl) + 1);
+    sprintf(LocalUrl, "%s%s", gUrl, AccessUrl);
+    printf("%s\n", LocalUrl);
+    printf("%s\n", Body);
+
+    curl_easy_setopt(Curl, CURLOPT_URL, LocalUrl);
 
     // Specify the POST Data
     curl_easy_setopt(Curl, CURLOPT_POSTFIELDS, Body);
@@ -393,18 +460,36 @@ Fingerprint_Update (
       Status = 1;
       goto FINISH;
     }
+    printf("fingerprint.c %d\n", __LINE__);
   }
 
   Fingerprint_Write (This);
 
 FINISH:
+  printf("Fingerprint_Update End\n");
+
   if (Curl != NULL) {
     curl_easy_cleanup(Curl);
     Curl = NULL;
   }
   if (This->Data != NULL) {
+    for (Index = 0; Index < This->NumberOfPackets; Index++) {
+      if (This->Data[Index] != NULL) {
+        free(This->Data[Index]);
+        This->Data[Index] = NULL;
+      }
+    }
     free(This->Data);
     This->Data = NULL;
+  }
+
+  if (Body != NULL) {
+    free(Body);
+    Body = NULL;
+  }
+  if (LocalUrl != NULL) {
+    free(LocalUrl);
+    LocalUrl = NULL;
   }
 
   return Status;
@@ -426,16 +511,12 @@ Fingerprint_Init (
 
   Fingerprint->Add = Fingerprint_Add;
   Fingerprint->Remove = Fingerprint_Remove;
+  Fingerprint->Send = Fingerprint_Send;
+
   Fingerprint->Update = Fingerprint_Update;
-  Fingerprint->Dispose = Fingerprint_Dispose;
   Fingerprint->Load = Fingerprint_Load;
 
-  printf ("Initializing libcurl... ");
-  if (curl_global_init(CURL_GLOBAL_ALL) < 0) {
-    printf("FAILED!\n");
-    goto GENERAL_ERROR;
-  }
-  printf ("OK!\n");
+  Fingerprint->Dispose = Fingerprint_Dispose;
 
   switch(Type) {
     case ENROLL_PROCESS:
