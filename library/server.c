@@ -3,6 +3,7 @@
 
 #include "server.h"
 #include "protocols/http_protocol.h"
+#include "protocols/image_protocol.h"
 
 struct lws_protocols protocols[] =
 {
@@ -10,6 +11,12 @@ struct lws_protocols protocols[] =
     "http-protocol",
 		callback_http,
 		sizeof (per_session_data__http),
+		0,
+  },
+  {
+    "image-protocol",
+		CallbackImage,
+    sizeof(IMAGE_PROTOCOL_SESSION),
 		0,
   },
   { NULL, NULL, 0, 0 } /* terminator */
