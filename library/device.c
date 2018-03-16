@@ -9,6 +9,8 @@
 extern char* gUrl;
 extern char* gPassword;
 
+#define NUMBER_OF_TRIES 5
+
 int
 Device_SentRequest_Callback (
     char *ptr,
@@ -111,6 +113,7 @@ FINISH:
   return Resource;
 }
 
+
 int
 Device_Verify (
     DEVICE* This
@@ -122,10 +125,14 @@ Device_Verify (
     goto FINISH;
   }
 
-  size_t CacheMatchPos = 0;
-  int    ResultCode = 0;
+  size_t         CacheMatchPos = 0;
+  int            ResultCode = 0;
+  struct fp_img* FingerprintImage = NULL;
 
-  ResultCode = fp_identify_finger(This->Device, This->Fingerprint->FingerprintList, &CacheMatchPos);
+  ResultCode = fp_identify_finger_img ( This->Device,
+                                        This->Fingerprint->FingerprintList,
+                                        &CacheMatchPos,
+                                        &FingerprintImage );
   if (ResultCode < 0) {
     printf("ERROR MATCHING FINGERPRINT!!\n");
   }
@@ -154,8 +161,119 @@ Device_Verify (
       break;
   }
 
+  if (FingerprintImage != NULL) {
+    fp_img_standardize(FingerprintImage);
+    fp_img_save_to_file(FingerprintImage, "finger_standardized.pgm");
+  }
+
+  if (This->FingerprintImage != NULL) {
+    fp_img_free(This->FingerprintImage);
+  }
+  This->FingerprintImage = FingerprintImage;
+
 FINISH:
   printf("Device_Verify End\n");
+  return ResultCode;
+}
+
+
+int
+Device_EnrollTest (
+    DEVICE* This,
+    int     Signature
+    )
+{
+  printf("Device_TestEnroll Begin\n");
+
+  if (This == NULL) {
+    goto FINISH;
+  }
+
+  size_t CacheMatchPos = 0;
+  int    ResultCode = 0;
+
+  ResultCode = fp_identify_finger_img ( This->Device,
+                                        This->Fingerprint->FingerprintList,
+                                        &CacheMatchPos,
+                                        NULL );
+  if (ResultCode < 0) {
+    printf("ERROR MATCHING FINGERPRINT!!\n");
+  }
+
+  switch (ResultCode){
+    case FP_VERIFY_NO_MATCH:
+      printf("❮ ☝ ✖ ❯ Fingerprint does not match any database entry\n");
+      break;
+
+    case FP_VERIFY_RETRY:
+    case FP_VERIFY_RETRY_TOO_SHORT:
+    case FP_VERIFY_RETRY_CENTER_FINGER:
+    case FP_VERIFY_RETRY_REMOVE_FINGER:
+      printf("❮ ☝ ↻ ❯ Failed to read fingerprint, retrying...\n");
+      break;
+    case FP_VERIFY_MATCH:
+      if (This->Fingerprint->UserIdList[CacheMatchPos] == Signature) {
+        printf("❮ ☝ ✔ ❯ Fingerprint match user\n");
+        ResultCode = 0;
+      } else {
+        printf("❮ ☝ ↻ ❯ Failed to read fingerprint, retrying...\n");
+        ResultCode = 1;
+      }
+      break;
+  }
+
+FINISH:
+  printf("Device_TestEnroll End\n");
+  return ResultCode;
+}
+
+int
+Device_EnrollScan (
+    DEVICE* This,
+    FINGERPRINT_FILE_ENROLL* Data
+    )
+{
+  printf("Device_EnrollScan Begin\n");
+
+  int NumbersEnroll = 0;
+  int Index = 0;
+  int ResultCode = 0;
+  struct fp_print_data* Fingerprint = NULL;
+
+  NumbersEnroll = fp_dev_get_nr_enroll_stages(This->Device);
+
+  for (Index = 0; Index < NumbersEnroll; Index++) {
+    ResultCode = fp_enroll_finger(This->Device, &Fingerprint);
+
+    if (ResultCode < 0) {
+      printf("I/0 Error, aborting enrollment...\n");
+      goto FINISH;
+    }
+
+    switch(ResultCode) {
+      case FP_ENROLL_FAIL:
+        printf("❮ ☝ ✖ ❯ Data processing failed, aborting enrollment ...\n");
+        goto FINISH;
+      case FP_ENROLL_RETRY:
+      case FP_ENROLL_RETRY_TOO_SHORT:
+      case FP_ENROLL_RETRY_CENTER_FINGER:
+      case FP_ENROLL_RETRY_REMOVE_FINGER:
+        printf("❮ ☝ ↻ ❯ Failed to read fingerprint, retrying stage...\n");
+        Index--;
+        continue;
+      case FP_ENROLL_PASS:
+        printf("❮ ☝ ✔ ❯ Stage %d/%d\n", 1 + Index, NumbersEnroll);
+        break;
+      case FP_ENROLL_COMPLETE:
+        ResultCode = 0;
+        printf("❮ ✔ ❯ Enrollment completed\n");
+        break;
+    }
+  }
+  Data->Fingerprint = Fingerprint;
+  Data->UserId = -1;
+
+FINISH:
   return ResultCode;
 }
 
@@ -164,8 +282,63 @@ Device_Enroll (
     DEVICE* This
     )
 {
-  printf("Device_Enroll called\n");
-  return 0;
+  printf("Device_Enroll Begin\n");
+  FINGERPRINT_FILE_ENROLL Data = { 0 };
+  int Index = 0;
+  int Score = 0;
+  int ResultCode = 0;
+
+  do {
+
+    if (Data.Fingerprint != NULL) {
+      //fp_print_data_free(Data.Fingerprint);
+      Data.Fingerprint = NULL;
+    }
+
+    ResultCode = Device_EnrollScan(This, &Data);
+    if(ResultCode < 0) {
+      goto FINISH;
+    }
+
+    // Successfull enroll, loading other fingerprints to test
+    This->Fingerprint->Update(This->Fingerprint);
+    if (This->Fingerprint->Load(This->Fingerprint) == 0) {
+      printf("Loading from file and adding...\n");
+      This->Fingerprint->Add(This->Fingerprint, &Data);
+    } else {
+      printf("Loading directly...\n");
+      // not possible to load from file, set new fingerprint list
+      This->Fingerprint->FingerprintList = &(Data.Fingerprint);
+      This->Fingerprint->UserIdList = &(Data.UserId);
+    }
+
+    for (Index = 0; Index < NUMBER_OF_TRIES; Index++) {
+      ResultCode = Device_EnrollTest(This, Data.UserId);
+      if(ResultCode < 0) {
+        goto FINISH;
+      } else if (ResultCode == 0) {
+        Score++;
+      }
+    }
+  } while(Score < NUMBER_OF_TRIES - 1);
+
+FINISH:
+
+  if (ResultCode < 0) {
+    if (Data.Fingerprint != NULL) {
+      fp_print_data_free(Data.Fingerprint);
+    }
+    if (This->Fingerprint->FingerprintList != NULL) {
+      //fp_print_data_free(This->Fingerprint->FingerprintList);
+      This->Fingerprint->FingerprintList = NULL;
+    }
+    if (This->Fingerprint->UserIdList != NULL) {
+      free(This->Fingerprint->UserIdList);
+      This->Fingerprint->UserIdList = NULL;
+    }
+  }
+  printf("Device_Enroll End\n");
+  return ResultCode;
 }
 
 void
@@ -174,13 +347,26 @@ Device_Dispose (
     )
 {
   if (This != NULL) {
+    printf("Device.c %d\n", __LINE__);
     if (This->Fingerprint != NULL) {
+      printf("Device.c %d\n", __LINE__);
       This->Fingerprint->Dispose(This->Fingerprint);
+      printf("Device.c %d\n", __LINE__);
       This->Fingerprint = NULL;
     }
+    printf("Device.c %d\n", __LINE__);
+    if (This->FingerprintImage != NULL) {
+      printf("Device.c %d\n", __LINE__);
+      fp_img_free(This->FingerprintImage);
+      printf("Device.c %d\n", __LINE__);
+    }
+    printf("Device.c %d\n", __LINE__);
     if (This->Device != NULL) {
-      free(This->Device);
-      This->Device = NULL;
+      printf("Device.c %d\n", __LINE__);
+      fp_dev_close(This->Device);
+      printf("Device.c %d\n", __LINE__);
+      fp_exit();
+      printf("Device.c %d\n", __LINE__);
     }
     free(This);
   }
@@ -231,7 +417,7 @@ Device_InitLibFP (
   }
 
   // free list of devices from memory
-  fp_dscv_devs_free(DevicesFound);
+  //fp_dscv_devs_free(DevicesFound);
 
   This->Device = Device;
   printf("Device_InitLibFP End %d\n", __LINE__);
@@ -259,7 +445,9 @@ Device_Init (
   switch(Type) {
     case ENROLL_PROCESS:
     case VERIFY_PROCESS:
+      printf("device.c %d\n", __LINE__);
       Device->Fingerprint = Fingerprint_Init(Type);
+      printf("device.c %d\n", __LINE__);
       if (Device->Fingerprint == NULL) {
         goto GENERAL_ERROR;
       }
@@ -269,7 +457,18 @@ Device_Init (
       goto GENERAL_ERROR;
   }
 
+#ifdef WIRINGPILIB
+  // Initializing WiringPI
+  printf("Initializing WiringPi...");
+  wiringPiSetup();
+  pinMode(DOOR, OUTPUT);
+  digitalWrite(DOOR, LOW);
+  printf("OK!\n");
+#endif
+
+  printf("device.c %d\n", __LINE__);
   Device_InitLibFP(Device);
+  printf("device.c %d\n", __LINE__);
   if(Device->Device == NULL) {
     goto GENERAL_ERROR;
   }
@@ -277,12 +476,18 @@ Device_Init (
   goto FINISH;
 
 GENERAL_ERROR:
+  printf("device.c %d\n", __LINE__);
   if (Device != NULL) {
+    printf("device.c %d\n", __LINE__);
     Device->Dispose(Device);
+    printf("device.c %d\n", __LINE__);
     Device = NULL;
+    printf("device.c %d\n", __LINE__);
   }
+  printf("device.c %d\n", __LINE__);
 
 FINISH:
+  printf("device.c %d\n", __LINE__);
   return Device;
 }
 
