@@ -346,6 +346,13 @@ Fingerprint_Download (
     goto FINISH;
   }
 
+  // workaround
+  // for some reason "+" character is considered " "
+  // in the request response, i'm not sure why
+  while ((Aux = strchr(ptr, ' ')) != NULL) {
+    *Aux = '+';
+  }
+
   This = (FINGERPRINT*) userdata;
 
   if (This->LargePacket < nmemb) {
