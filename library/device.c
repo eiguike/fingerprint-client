@@ -395,7 +395,8 @@ Device_InitLibFP (
 
   // if no device found, exit the program
   if (DevicesFound == NULL || DevicesFound[0] == NULL) {
-    printf("No reader found!");
+    printf("No reader found!\n");
+    goto FINISH;
   }
 
   // list devices found
@@ -407,20 +408,26 @@ Device_InitLibFP (
   }
 
   // choose the first reader to use, and open it
-  Device = fp_dev_open(DevicesFound[0]);
+  if (DevicesFound[0] != NULL) {
+    Device = fp_dev_open(DevicesFound[0]);
+  }
 
   // check if the reader could be opened
   if (Device == NULL) {
-    printf("Couldn't open selected reader for use!");
+    printf("Couldn't open selected reader for use!\n");
   } else {
     printf("❮ ✔ ❯ Reader ready\n");
   }
 
   // free list of devices from memory
-  //fp_dscv_devs_free(DevicesFound);
+  if (DevicesFound != NULL) {
+    fp_dscv_devs_free(DevicesFound);
+  }
 
   This->Device = Device;
+FINISH:
   printf("Device_InitLibFP End %d\n", __LINE__);
+  return;
 }
 
 DEVICE*
@@ -449,6 +456,7 @@ Device_Init (
       Device->Fingerprint = Fingerprint_Init(Type);
       printf("device.c %d\n", __LINE__);
       if (Device->Fingerprint == NULL) {
+        printf("Fingerprint_Init fails %d\n", __LINE__);
         goto GENERAL_ERROR;
       }
       break;
@@ -466,9 +474,7 @@ Device_Init (
   printf("OK!\n");
 #endif
 
-  printf("device.c %d\n", __LINE__);
   Device_InitLibFP(Device);
-  printf("device.c %d\n", __LINE__);
   if(Device->Device == NULL) {
     goto GENERAL_ERROR;
   }
@@ -476,18 +482,12 @@ Device_Init (
   goto FINISH;
 
 GENERAL_ERROR:
-  printf("device.c %d\n", __LINE__);
   if (Device != NULL) {
-    printf("device.c %d\n", __LINE__);
     Device->Dispose(Device);
-    printf("device.c %d\n", __LINE__);
     Device = NULL;
-    printf("device.c %d\n", __LINE__);
   }
-  printf("device.c %d\n", __LINE__);
 
 FINISH:
-  printf("device.c %d\n", __LINE__);
   return Device;
 }
 
