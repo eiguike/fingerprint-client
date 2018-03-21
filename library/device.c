@@ -277,6 +277,7 @@ Device_Enroll (
   int ResultCode = 0;
 
   do {
+    Score = 0;
     if (This->Fingerprint != NULL) {
       This->Fingerprint->Dispose(This->Fingerprint);
     }
@@ -310,15 +311,18 @@ Device_Enroll (
         goto FINISH;
       } else if (ResultCode == 0) {
         Score++;
+      } else {
+        printf("❮ ⚠ ❯ Failed to enroll, restarting process...\n");
+        break;
       }
       printf("SCORE: %d/%d\n", Score, NUMBER_OF_TRIES);
     }
 
-  } while(Score < NUMBER_OF_TRIES - 1);
+  } while(Score < NUMBER_OF_TRIES);
 
-  This->Fingerprint->Send(This->Fingerprint,
-                          Data.Fingerprint,
-                          &(This->Outdated));
+  This->Fingerprint->Send( This->Fingerprint,
+                           Data.Fingerprint,
+                           &(This->Outdated) );
 
 FINISH:
 
