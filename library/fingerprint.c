@@ -15,9 +15,9 @@
 extern char* gUrl;
 extern char* gPassword;
 
-unsigned char*
+BUF_MEM*
 EncodeToB64 (
-    struct fp_print_data** Print,
+    struct fp_print_data* Print,
     size_t* Size
     )
 {
@@ -28,11 +28,11 @@ EncodeToB64 (
   BIO*           Base64 = NULL;
   BUF_MEM*       BufferPtr;
 
-  if (Print == NULL) {
+  if (Print == NULL || Size == NULL) {
     goto FINISH;
   }
 
-  FingerprintDataSize = fp_print_data_get_data(*Print, &FingerprintData);
+  FingerprintDataSize = fp_print_data_get_data(Print, &FingerprintData);
 
   if (FingerprintDataSize == 0) {
     goto FINISH;
@@ -66,10 +66,8 @@ EncodeToB64 (
     Buffer = NULL;
   }
 
-  free(BufferPtr);
-
 FINISH:
-  return Buffer;
+  return BufferPtr;
 }
 
 unsigned char*
@@ -97,13 +95,9 @@ DecodeFromB64 (
     *DecodeLen -= 1;
   }
 
-  //printf("SIZE %ld\n", Size);
-  //printf("DECODELEN %ld\n", *DecodeLen);
-
   Buffer = (unsigned char*) calloc(*DecodeLen + 1, sizeof(char));
 
   if (Buffer == NULL) {
-    printf("calloc failed! %d\n", __LINE__);
     goto FINISH;
   }
 
@@ -129,7 +123,6 @@ Fingerprint_Load (
     FINGERPRINT* This
     )
 {
-  printf("Fingerprint_Load Begin \n");
   FINGERPRINT_FILE       FingerprintInstance;
   FILE*                  File = NULL;
   struct fp_print_data** Fingerprints = NULL;
@@ -147,7 +140,9 @@ Fingerprint_Load (
   // Deallocating previously fingerprint list
   if (This->FingerprintList != NULL) {
     for (Index = 0; Index < This->NumberOfFingerprints; Index++) {
-      fp_print_data_free(This->FingerprintList[Index]);
+      if (This->FingerprintList[Index] != NULL) {
+        fp_print_data_free(This->FingerprintList[Index]);
+      }
     }
     free(This->FingerprintList);
     This->FingerprintList = NULL;
@@ -162,7 +157,6 @@ Fingerprint_Load (
   File = fopen("sigla_database.db", "rb");
 
   if (File == NULL) {
-    printf("fopen returned NULL %d\n", __LINE__);
     Status = 1;
     goto FINISH;
   }
@@ -191,7 +185,7 @@ Fingerprint_Load (
     UserIds[NoFingerprints - 1] = FingerprintInstance.UserId;
 
     if (Fingerprints[NoFingerprints - 1] == NULL ) {
-      printf("could not ready entry from cache file\n");
+      printf("❮ ⚠ ❯ Could not read file from Cache File\n");
       Status = 1;
       goto GENERAL_ERROR;
     }
@@ -242,7 +236,6 @@ Fingerprint_Write (
     FINGERPRINT* This
     )
 {
-  printf("Fingerprint_Write Begin \n");
   FINGERPRINT_FILE FingerprintInstance = { 0 };
   cJSON*           JsonData = NULL;
   cJSON*           JsonInstance = NULL;
@@ -257,13 +250,11 @@ Fingerprint_Write (
   File = fopen("sigla_database.db", "w");
 
   if (File == NULL) {
-    printf("fopen returned NULL\n");
     goto FINISH;
   }
 
   JsonData = cJSON_Parse((char*)This->Data[0]);
   if (JsonData == NULL) {
-    printf("Could not parse JSON request!\n");
     goto FINISH;
   } else {
     cJSON_ArrayForEach(JsonInstance, JsonData) {
@@ -273,16 +264,11 @@ Fingerprint_Write (
       FingerprintInstance.UserId = UserId->valueint;
       strcpy(FingerprintInstance.Fingerprint, Fingerprint->valuestring);
 
-      //printf("USERID: %d\n", FingerprintInstance.UserId);
-      //printf("FINGERPRINT: %s\n", FingerprintInstance.Fingerprint);
-
-      //fwrite (&FingerprintInstance, sizeof(FINGERPRINT_FILE), 1, File);
       fprintf(File, "%d|%s\n", UserId->valueint, Fingerprint->valuestring);
     }
   }
 
 FINISH:
-  printf("Fingerprint_Write End\n");
   if (File != NULL) {
     fclose(File);
   }
@@ -328,6 +314,30 @@ Fingerprint_Dispose (
 }
 
 int
+Fingerprint_Upload (
+    char *ptr,
+    size_t size,
+    size_t nmemb,
+    void *userdata
+    )
+{
+  int* Update = (int*)userdata;
+
+  if (Update == NULL) {
+    goto FINISH;
+  }
+
+  if (strstr(ptr, "true") != NULL) {
+    *Update = 1;
+  } else {
+    *Update = 0;
+  }
+
+FINISH:
+  return size*nmemb;
+}
+
+int
 Fingerprint_Download (
     char *ptr,
     size_t size,
@@ -342,16 +352,16 @@ Fingerprint_Download (
   int          Index = 0;
 
   if (userdata == NULL) {
-    printf("Userdata == NULL %d\n", __LINE__);
     goto FINISH;
   }
 
   // workaround
   // for some reason "+" character is considered " "
-  // in the request response, i'm not sure why
+  // in the request Resourceponse, i'm not sure why
   while ((Aux = strchr(ptr, ' ')) != NULL) {
     *Aux = '+';
   }
+  Aux = NULL;
 
   This = (FINGERPRINT*) userdata;
 
@@ -363,6 +373,8 @@ Fingerprint_Download (
     This->Data = realloc(This->Data, sizeof(char*) * (This->NumberOfPackets + 1));
     Aux = (char*) calloc(1, nmemb + 1);
     strcpy(Aux, ptr);
+    Aux[nmemb] = '\0';
+
     This->Data[This->NumberOfPackets] = Aux;
     This->NumberOfPackets += 1;
   } else {
@@ -381,7 +393,7 @@ Fingerprint_Download (
     }
     strncpy(Aux + LastIndex, ptr, nmemb);
 
-    This->Data = realloc(This->Data, sizeof(char*) + 1);
+    This->Data = realloc(This->Data, sizeof(char*) * 2 );
     This->Data[0] = Aux;
     This->Data[1] = NULL;
     This->NumberOfPackets = 2;
@@ -393,9 +405,67 @@ FINISH:
 
 int
 Fingerprint_Send (
-    FINGERPRINT* This
+    FINGERPRINT* This,
+    struct fp_print_data* Data,
+    int*         Update
     )
 {
+  printf("❮ ⬆ ❯ uploading fingerprint...\n");
+  CURL*    Curl;
+  CURLcode Resource;
+  char*    LocalUrl = NULL;
+  char*    Body = NULL;
+  char*    AccessBody = "hash_biometric=%s";
+  char*    AccessUrl = "/api/fingerprint/new";
+  BUF_MEM* Buffer = NULL;
+  size_t   EncodeLen = 0;
+
+  Curl = curl_easy_init();
+  if (Curl == NULL){
+    printf("❮ ⚠ ❯ Couldn't get a Curl handler, fingerprint was NOT saved on the server!\n");
+    goto FINISH;
+  }
+
+  Buffer = EncodeToB64 ( Data,
+                         &EncodeLen );
+
+  if (Buffer == NULL) {
+    printf("❮ ⚠ ❯ Could not save fingerprint on the server! (%s)\n", "Encode Failed!");
+    goto GENERAL_ERROR;
+  }
+
+  Body = realloc(Body, strlen(AccessBody) + (Buffer->length * sizeof(char)) + 1);
+  sprintf(Body, AccessBody, Buffer->data);
+  LocalUrl = realloc(LocalUrl, strlen(gUrl) + strlen(AccessUrl) + 1);
+  sprintf(LocalUrl, "%s%s", gUrl, AccessUrl);
+
+  curl_easy_setopt(Curl, CURLOPT_URL, LocalUrl);
+  /* Now specify the POST data */
+  curl_easy_setopt(Curl, CURLOPT_POSTFIELDS, Body);
+  curl_easy_setopt(Curl, CURLOPT_WRITEFUNCTION, Fingerprint_Upload );
+  curl_easy_setopt(Curl, CURLOPT_WRITEDATA, Update);
+
+  /* Perform the request, Resource will get the return code */
+  Resource = curl_easy_perform(Curl);
+
+  /* Check for errors */
+  if (Resource != CURLE_OK) {
+    printf("❮ ⚠ ❯ Could not save fingerprint on the server! (%s)\n", curl_easy_strerror(Resource));
+  }else{
+    printf("❮ ✔ ❯ Fingerprint saved to the server\n");
+  }
+
+GENERAL_ERROR:
+  curl_easy_cleanup(Curl);
+
+  if (Body != NULL) {
+    free(Body);
+  }
+  if (LocalUrl != NULL) {
+    free(LocalUrl);
+  }
+
+FINISH:
   return 0;
 }
 
@@ -405,6 +475,43 @@ Fingerprint_Add (
     FINGERPRINT_FILE_ENROLL* Fingerprint
     )
 {
+  if (This == NULL || Fingerprint == NULL) {
+    goto FINISH;
+  }
+
+  unsigned char* Buffer = NULL;
+  size_t         DecodeLen = 0;
+
+  This->NumberOfFingerprints += 1;
+
+  This->FingerprintList =
+    realloc( This->FingerprintList,
+      sizeof(struct fp_print_data*) * This->NumberOfFingerprints);
+
+  This->UserIdList =
+    realloc( This->UserIdList,
+      sizeof(int) * This->NumberOfFingerprints);
+
+  if (This->FingerprintList != NULL) {
+    This->FingerprintList[This->NumberOfFingerprints - 2] =
+      Fingerprint->Fingerprint;
+
+    This->UserIdList[This->NumberOfFingerprints - 2] =
+      Fingerprint->UserId;
+  } else {
+    This->FingerprintList[This->NumberOfFingerprints - 1] =
+      fp_print_data_from_data(Buffer, DecodeLen);
+
+    This->UserIdList[This->NumberOfFingerprints - 1] =
+      Fingerprint->UserId;
+
+    This->NumberOfFingerprints += 1;
+    This->FingerprintList =
+      realloc( This->FingerprintList,
+        sizeof(struct fp_print_data*) * This->NumberOfFingerprints);
+  }
+
+FINISH:
   return 0;
 }
 
@@ -423,7 +530,7 @@ Fingerprint_Update (
     FINGERPRINT* This
     )
 {
-  printf("Fingerprint_Update Begin\n");
+  //printf("Fingerprint_Update Begin\n");
   int       Status = 0;
   int       Index = 0;
   CURL*     Curl = NULL;
@@ -438,11 +545,10 @@ Fingerprint_Update (
     goto FINISH;
   }
 
-  printf("fingerprint.c %d\n", __LINE__);
   Curl = curl_easy_init();
 
   if (Curl == NULL) {
-    printf("Couldn't get a curl handler!!\n");
+    printf("❮ ⚠ ❯ Couldn't get a CURL handler!\n");
     Status = 1;
     goto FINISH;
   } else {
@@ -450,8 +556,6 @@ Fingerprint_Update (
     sprintf(Body, AccessBody, gPassword);
     LocalUrl = realloc(LocalUrl, strlen(gUrl) + strlen(AccessUrl) + 1);
     sprintf(LocalUrl, "%s%s", gUrl, AccessUrl);
-    printf("%s\n", LocalUrl);
-    printf("%s\n", Body);
 
     curl_easy_setopt(Curl, CURLOPT_URL, LocalUrl);
 
@@ -463,18 +567,14 @@ Fingerprint_Update (
     Resource = curl_easy_perform(Curl);
 
     if (Resource != CURLE_OK) {
-      printf("Could not download all fingerprints!! %s\n", curl_easy_strerror(Resource));
+      printf("❮ ⚠ ❯ Could not download all fingerprints! %s\n", curl_easy_strerror(Resource));
       Status = 1;
       goto FINISH;
     }
-    printf("fingerprint.c %d\n", __LINE__);
   }
-
   Fingerprint_Write (This);
 
 FINISH:
-  printf("Fingerprint_Update End\n");
-
   if (Curl != NULL) {
     curl_easy_cleanup(Curl);
     Curl = NULL;
@@ -512,7 +612,6 @@ Fingerprint_Init (
   Fingerprint = calloc(1, sizeof(FINGERPRINT));
 
   if (Fingerprint == NULL) {
-    printf("Calloc returned NULL...\n");
     goto FINISH;
   }
 
@@ -532,16 +631,16 @@ Fingerprint_Init (
     case VERIFY_PROCESS:
       // Here we would like to download from the database these fingerprints
       if (Fingerprint->Update(Fingerprint) != 0) {
-        printf("Something wrong happened in Update\n");
+        printf("❮ ⚠ ❯ Failed to Update Fingerprint database!\n");
       }
 
       if (Fingerprint->Load(Fingerprint) != 0) {
-        printf("Something wrong happened in Load function\n");
+        printf("❮ ⚠ ❯ Failed to Load Database from File!\n");
         goto GENERAL_ERROR;
       }
       break;
     default:
-      printf("Unknown process, exiting...\n");
+      printf("❮ ⚠ ❯ Unknown process, aborting...\n");
       goto GENERAL_ERROR;
   }
   goto FINISH;

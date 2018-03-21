@@ -19,7 +19,6 @@ Device_SentRequest_Callback (
     void *userdata
     )
 {
-  printf("Device_SentRequest_Callback Begin\n");
   char*   Aux = NULL;
   DEVICE* This = NULL;
 
@@ -30,13 +29,11 @@ Device_SentRequest_Callback (
   Aux = ptr;
   This = (DEVICE*)userdata;
 
-  printf("ptr %s\n", Aux);
-
   if(strstr(Aux, "true") != NULL){
-    printf("OUTDATED!!\n");
+    printf("❮ ⚠ ❯ Fingerprint Database Outdated!\n");
     This->Outdated = 1;
   }else{
-    printf("UP TO DATE!\n");
+    printf("❮ ✔ ❯ Fingerprint Database Up to Date!\n");
     This->Outdated = 0;
   }
 
@@ -119,8 +116,6 @@ Device_Verify (
     DEVICE* This
     )
 {
-  printf("Device_Verify Begin\n");
-
   if (This == NULL) {
     goto FINISH;
   }
@@ -134,7 +129,7 @@ Device_Verify (
                                         &CacheMatchPos,
                                         &FingerprintImage );
   if (ResultCode < 0) {
-    printf("ERROR MATCHING FINGERPRINT!!\n");
+    //printf("ERROR MATCHING FINGERPRINT!!\n");
   }
 
   switch (ResultCode){
@@ -172,7 +167,6 @@ Device_Verify (
   This->FingerprintImage = FingerprintImage;
 
 FINISH:
-  printf("Device_Verify End\n");
   return ResultCode;
 }
 
@@ -183,8 +177,6 @@ Device_EnrollTest (
     int     Signature
     )
 {
-  printf("Device_TestEnroll Begin\n");
-
   if (This == NULL) {
     goto FINISH;
   }
@@ -197,7 +189,6 @@ Device_EnrollTest (
                                         &CacheMatchPos,
                                         NULL );
   if (ResultCode < 0) {
-    printf("ERROR MATCHING FINGERPRINT!!\n");
   }
 
   switch (ResultCode){
@@ -223,7 +214,6 @@ Device_EnrollTest (
   }
 
 FINISH:
-  printf("Device_TestEnroll End\n");
   return ResultCode;
 }
 
@@ -233,7 +223,6 @@ Device_EnrollScan (
     FINGERPRINT_FILE_ENROLL* Data
     )
 {
-  printf("Device_EnrollScan Begin\n");
 
   int NumbersEnroll = 0;
   int Index = 0;
@@ -246,7 +235,7 @@ Device_EnrollScan (
     ResultCode = fp_enroll_finger(This->Device, &Fingerprint);
 
     if (ResultCode < 0) {
-      printf("I/0 Error, aborting enrollment...\n");
+      printf("❮ ⚠ ❯ I/0 Error, aborting enrollment...\n");
       goto FINISH;
     }
 
@@ -282,16 +271,18 @@ Device_Enroll (
     DEVICE* This
     )
 {
-  printf("Device_Enroll Begin\n");
   FINGERPRINT_FILE_ENROLL Data = { 0 };
   int Index = 0;
   int Score = 0;
   int ResultCode = 0;
 
   do {
+    if (This->Fingerprint != NULL) {
+      This->Fingerprint->Dispose(This->Fingerprint);
+    }
+    This->Fingerprint = Fingerprint_Init(ENROLL_PROCESS);
 
     if (Data.Fingerprint != NULL) {
-      //fp_print_data_free(Data.Fingerprint);
       Data.Fingerprint = NULL;
     }
 
@@ -303,11 +294,12 @@ Device_Enroll (
     // Successfull enroll, loading other fingerprints to test
     This->Fingerprint->Update(This->Fingerprint);
     if (This->Fingerprint->Load(This->Fingerprint) == 0) {
-      printf("Loading from file and adding...\n");
+      //printf("Loading from file and adding...\n");
       This->Fingerprint->Add(This->Fingerprint, &Data);
     } else {
-      printf("Loading directly...\n");
+      //printf("Loading directly...\n");
       // not possible to load from file, set new fingerprint list
+      This->Fingerprint->NumberOfFingerprints = 1;
       This->Fingerprint->FingerprintList = &(Data.Fingerprint);
       This->Fingerprint->UserIdList = &(Data.UserId);
     }
@@ -319,8 +311,14 @@ Device_Enroll (
       } else if (ResultCode == 0) {
         Score++;
       }
+      printf("SCORE: %d/%d\n", Score, NUMBER_OF_TRIES);
     }
+
   } while(Score < NUMBER_OF_TRIES - 1);
+
+  This->Fingerprint->Send(This->Fingerprint,
+                          Data.Fingerprint,
+                          &(This->Outdated));
 
 FINISH:
 
@@ -337,7 +335,6 @@ FINISH:
       This->Fingerprint->UserIdList = NULL;
     }
   }
-  printf("Device_Enroll End\n");
   return ResultCode;
 }
 
@@ -347,26 +344,16 @@ Device_Dispose (
     )
 {
   if (This != NULL) {
-    printf("Device.c %d\n", __LINE__);
     if (This->Fingerprint != NULL) {
-      printf("Device.c %d\n", __LINE__);
       This->Fingerprint->Dispose(This->Fingerprint);
-      printf("Device.c %d\n", __LINE__);
       This->Fingerprint = NULL;
     }
-    printf("Device.c %d\n", __LINE__);
     if (This->FingerprintImage != NULL) {
-      printf("Device.c %d\n", __LINE__);
       fp_img_free(This->FingerprintImage);
-      printf("Device.c %d\n", __LINE__);
     }
-    printf("Device.c %d\n", __LINE__);
     if (This->Device != NULL) {
-      printf("Device.c %d\n", __LINE__);
       fp_dev_close(This->Device);
-      printf("Device.c %d\n", __LINE__);
       fp_exit();
-      printf("Device.c %d\n", __LINE__);
     }
     free(This);
   }
@@ -378,8 +365,6 @@ Device_InitLibFP (
     DEVICE* This
     )
 {
-  printf("Device_InitLibFP Begin %d\n", __LINE__);
-
   struct fp_dscv_dev** DevicesFound = NULL;
   struct fp_dscv_dev*  DiscoverDevice = NULL;
   struct fp_driver*    Driver = NULL;
@@ -387,7 +372,7 @@ Device_InitLibFP (
 
   // if the lib couldn't be initialized
   if (fp_init() < 0) {
-    printf("Failed to initialize libfprint!");
+    printf("❮ ⚠ ❯ Failed to initialize Libfprint!");
   }
 
   // find and open fingerprint reader
@@ -395,7 +380,7 @@ Device_InitLibFP (
 
   // if no device found, exit the program
   if (DevicesFound == NULL || DevicesFound[0] == NULL) {
-    printf("No reader found!\n");
+    printf("❮ ⚠ ❯ No reader found!\n");
     goto FINISH;
   }
 
@@ -404,7 +389,7 @@ Device_InitLibFP (
   for (int i = 0; DevicesFound[i] != NULL; i++) {
     DiscoverDevice = DevicesFound[i];
     Driver = fp_dscv_dev_get_driver(DiscoverDevice);
-    printf("%s\n", fp_driver_get_full_name(Driver));
+    printf("Reader choosen: %s\n", fp_driver_get_full_name(Driver));
   }
 
   // choose the first reader to use, and open it
@@ -414,7 +399,7 @@ Device_InitLibFP (
 
   // check if the reader could be opened
   if (Device == NULL) {
-    printf("Couldn't open selected reader for use!\n");
+    printf("❮ ⚠ ❯ Couldn't open selected reader for use!\n");
   } else {
     printf("❮ ✔ ❯ Reader ready\n");
   }
@@ -426,7 +411,6 @@ Device_InitLibFP (
 
   This->Device = Device;
 FINISH:
-  printf("Device_InitLibFP End %d\n", __LINE__);
   return;
 }
 
@@ -435,13 +419,11 @@ Device_Init (
     PROCESS_TYPE Type
     )
 {
-  printf("Device_Init Begin %d\n", __LINE__);
   DEVICE* Device = NULL;
 
   Device = calloc(1, sizeof(DEVICE));
 
   if (Device == NULL) {
-    printf("Calloc returned NULL...\n");
     goto GENERAL_ERROR;
   }
 
@@ -451,17 +433,14 @@ Device_Init (
 
   switch(Type) {
     case ENROLL_PROCESS:
+      break;
     case VERIFY_PROCESS:
-      printf("device.c %d\n", __LINE__);
       Device->Fingerprint = Fingerprint_Init(Type);
-      printf("device.c %d\n", __LINE__);
       if (Device->Fingerprint == NULL) {
-        printf("Fingerprint_Init fails %d\n", __LINE__);
         goto GENERAL_ERROR;
       }
       break;
     default:
-      printf("Unknown process, exiting...\n");
       goto GENERAL_ERROR;
   }
 

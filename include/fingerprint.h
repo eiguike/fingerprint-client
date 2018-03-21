@@ -25,7 +25,7 @@ typedef struct FINGERPRINT_OBJECT {
   int (*Update) (struct FINGERPRINT_OBJECT* This);
 
   // This functions send the new fingerprint database to the server
-  int (*Send) (struct FINGERPRINT_OBJECT* This);
+  int (*Send) (struct FINGERPRINT_OBJECT* This, struct fp_print_data* Data, int* Update);
 
   // This functions load from local database its fingerprints
   int (*Load) (struct FINGERPRINT_OBJECT* This);

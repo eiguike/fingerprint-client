@@ -60,9 +60,7 @@ DeviceFingerprintThread (
 
   switch(Type) {
     case ENROLL_PROCESS:
-      while(1) {
-        gDevice->Enroll(gDevice);
-      }
+      gDevice->Enroll(gDevice);
       break;
     case VERIFY_PROCESS:
       while(1) {
@@ -76,14 +74,31 @@ DeviceFingerprintThread (
   }
 
 FINISH:
+  if (gDevice != NULL) {
+    gDevice->Dispose(gDevice);
+    gDevice = NULL;
+  }
+
   printf("DeviceFingerprintThread End\n");
   return NULL;
 }
 
-int main() {
-  //signal(SIGINT, SignalHandler);
-  //PROCESS_TYPE Type = ENROLL_PROCESS;
-  PROCESS_TYPE Type = VERIFY_PROCESS;
+int main(int argc, char* argv[]) {
+  PROCESS_TYPE Type = 0;
+
+  if (argc <= 1) {
+    printf("%s <enroll or verify>\n", argv[0]);
+    goto FINISH;
+  }
+
+  if (strstr(argv[1], "enroll") != NULL) {
+    Type = ENROLL_PROCESS;
+  } else if (strstr(argv[1], "verify") != NULL) {
+    Type = VERIFY_PROCESS;
+  } else {
+    printf("%s <enroll or verify>\n", argv[0]);
+    goto FINISH;
+  }
 
   printf ("Initializing libcurl... ");
   if (curl_global_init(CURL_GLOBAL_ALL) < 0) {
@@ -92,18 +107,15 @@ int main() {
   }
   printf ("OK!\n");
 
-  gDevice = Device_Init(Type);
-  gDevice->Dispose(gDevice);
-  //DeviceFingerprintThread((void*)&Type);
   //pthread_t WebService;
-  //pthread_t DeviceFingerprint;
+  pthread_t DeviceFingerprint;
 
   //pthread_create(&WebService, NULL, WebServiceThread, (void*)&Type);
-  //pthread_create(&DeviceFingerprint, NULL, DeviceFingerprintThread, (void*)&Type);
+  pthread_create(&DeviceFingerprint, NULL, DeviceFingerprintThread, (void*)&Type);
 
   //pthread_join(WebService, NULL);
-  //pthread_join(DeviceFingerprint, NULL);
-  //
+  pthread_join(DeviceFingerprint, NULL);
+
   curl_global_cleanup();
 FINISH:
   return 0;
