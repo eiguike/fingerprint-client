@@ -10,7 +10,7 @@
 DEVICE* gDevice = NULL;
 SERVER* gServer = NULL;
 
-char* gUrl = "http://localhost:3000";
+char* gUrl = "https://siglaufscar.herokuapp.com";
 char* gPassword = "testelabpesquisa";
 
 void
