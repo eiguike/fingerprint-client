@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -65,6 +66,7 @@ DeviceFingerprintThread (
     case VERIFY_PROCESS:
       while(1) {
         gDevice->Verify(gDevice);
+        usleep(3000000);
         if (gDevice->Outdated == 1) {
           gDevice->Fingerprint->Update(gDevice->Fingerprint);
           gDevice->Fingerprint->Load(gDevice->Fingerprint);
