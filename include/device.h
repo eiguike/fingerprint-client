@@ -4,6 +4,12 @@
 #include <libfprint/fprint.h>
 #include "fingerprint.h"
 
+#ifdef WIRINGPILIB
+#define DOOR 15
+#include <wiringPi.h>
+#endif
+
+
 typedef enum {
   ENROLL_PROCESS,
   VERIFY_PROCESS

@@ -26,6 +26,9 @@ target_link_libraries(Fingerprint crypto)
 target_link_libraries(Fingerprint fprint)
 
 target_link_libraries(Device Fingerprint)
+if(WIRINGPI)
+  target_link_libraries(Device wiringPi)
+endif()
 
 target_link_libraries(fingerprint-client Device)
 target_link_libraries(fingerprint-client Server)
